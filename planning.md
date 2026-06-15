@@ -136,14 +136,16 @@ Write out what a full user interaction looks like from start to finish — tool 
 
 **Example user query:** "I'm looking for a vintage graphic tee under $30. I mostly wear baggy jeans and chunky sneakers. What's out there and how would I style it?"
 
+**Milestone 1 summary:** FitFindr needs to turn a natural-language thrift request into a tool-driven styling flow: `search_listings` is triggered first from the requested item description, size, and budget; `suggest_outfit` is triggered only after a real listing is selected; and `create_fit_card` is triggered only after there is a complete outfit suggestion to summarize. The listings data includes fields like `id`, `title`, `description`, `category`, `style_tags`, `size`, `condition`, `price`, `colors`, `brand`, and `platform`, while the wardrobe input is an `items` list of closet pieces with `name`, `category`, `colors`, `style_tags`, and optional `notes`. If a tool cannot return useful data, the agent should explain the failure, stop or ask for better information when needed, and avoid passing empty or incomplete results into the next tool.
+
 **Step 1:**
-<!-- What does the agent do first? Which tool is called? With what input? -->
+The agent parses the query into a search request and calls `search_listings(description="vintage graphic tee", size=None, max_price=30.0)`. It filters the mock listings by the user's requested item and budget, then looks for style matches such as `graphic tee`, `vintage`, `streetwear`, or `grunge`.
 
 **Step 2:**
-<!-- What happens next? What was returned from step 1? What tool is called now? -->
+If `search_listings` returns matching listings, the agent stores the best match in session state as `selected_item`; for this query, that could be "Graphic Tee — 2003 Tour Bootleg Style" at `$24.00` from Depop. The agent then calls `suggest_outfit(new_item=selected_item, wardrobe=get_example_wardrobe())`, using the user's wardrobe clues plus the example wardrobe structure to find pieces like baggy jeans, chunky white sneakers, a black denim jacket, or combat boots.
 
 **Step 3:**
-<!-- Continue until the full interaction is complete -->
+After `suggest_outfit` returns a complete outfit idea, the agent stores it as `outfit_suggestion` and calls `create_fit_card(outfit=outfit_suggestion, new_item=selected_item)`. This final tool turns the listing and styling recommendation into a short, shareable caption.
 
 **Final output to user:**
-<!-- What does the user actually see at the end? -->
+The user sees the selected thrift listing, a short explanation of why it fits their style, a complete outfit suggestion using their wardrobe, and a caption-style fit card. If no matching listing is found, the user instead sees a clear message like: "I couldn't find a vintage graphic tee under $30 with those constraints; try raising the budget, broadening the size, or searching for 'band tee' or 'bootleg tee' instead."
