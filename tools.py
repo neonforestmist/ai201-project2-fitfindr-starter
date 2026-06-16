@@ -273,14 +273,10 @@ def search_listings(
         id, title, description, category, style_tags (list), size,
         condition, price (float), colors (list), brand, platform
 
-    TODO:
-        1. Load all listings with load_listings().
-        2. Filter by max_price and size (if provided).
-        3. Score each remaining listing by keyword overlap with `description`.
-        4. Drop any listings with a score of 0 (no relevant matches).
-        5. Sort by score, highest first, and return the listing dicts.
-
-    Before writing code, fill in the Tool 1 section of planning.md.
+    Implementation:
+        Loads listings with load_listings(), filters by hard constraints,
+        scores keyword overlap, drops irrelevant listings, and returns results
+        sorted by score.
     """
     if not description or not description.strip():
         return []
@@ -326,16 +322,10 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
         If the wardrobe is empty, offer general styling advice for the item
         rather than raising an exception or returning an empty string.
 
-    TODO:
-        1. Check whether wardrobe['items'] is empty.
-        2. If empty: call the LLM with a prompt for general styling ideas
-           (what kinds of items pair well, what vibe it suits, etc.).
-        3. If not empty: format the wardrobe items into a prompt and ask
-           the LLM to suggest specific outfit combinations using the new item
-           and named pieces from the wardrobe.
-        4. Return the LLM's response as a string.
-
-    Before writing code, fill in the Tool 2 section of planning.md.
+    Implementation:
+        Handles empty wardrobes with general advice, otherwise formats the
+        user's wardrobe into an LLM prompt and asks for specific combinations.
+        Falls back to deterministic styling text if the LLM call fails.
     """
     if not new_item:
         return "I need a selected listing before I can suggest an outfit."
@@ -398,13 +388,9 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
     - Capture the outfit vibe in specific terms
     - Sound different each time for different inputs (use higher LLM temperature)
 
-    TODO:
-        1. Guard against an empty or whitespace-only outfit string.
-        2. Build a prompt that gives the LLM the item details and the outfit,
-           and asks for a caption matching the style guidelines above.
-        3. Call the LLM and return the response.
-
-    Before writing code, fill in the Tool 3 section of planning.md.
+    Implementation:
+        Guards against missing outfit text, prompts the LLM with item and outfit
+        details, and falls back to a deterministic caption if the LLM call fails.
     """
     if not outfit or not outfit.strip():
         return "I need an outfit suggestion before I can create a fit card."
