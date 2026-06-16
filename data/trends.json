@@ -1,0 +1,42 @@
+[
+  {
+    "trend_name": "Soft grunge revival",
+    "category": "tops",
+    "tags": ["grunge", "graphic tee", "vintage", "streetwear"],
+    "colors": ["black", "charcoal", "red"],
+    "signal": "Graphic tees and darker thrift basics are trending as easy anchors for 90s-inspired outfits.",
+    "styling_tip": "Balance the tee with baggy denim, a structured jacket, and either chunky sneakers or combat boots."
+  },
+  {
+    "trend_name": "Track-layer nostalgia",
+    "category": "outerwear",
+    "tags": ["90s", "athletic", "streetwear", "colorblock"],
+    "colors": ["navy", "red", "green"],
+    "signal": "Lightweight athletic jackets are being styled as everyday layers over simple base outfits.",
+    "styling_tip": "Let the jacket be the color moment, then keep the base layer plain and repeat one jacket color in the shoes or accessory."
+  },
+  {
+    "trend_name": "Romantic utility",
+    "category": "bottoms",
+    "tags": ["cottagecore", "linen", "utility", "earth tones"],
+    "colors": ["cream", "brown", "olive"],
+    "signal": "Soft natural fabrics are showing up with functional pieces like belts, boots, and structured outerwear.",
+    "styling_tip": "Pair flowy bottoms with a fitted top or cropped jacket so the silhouette stays intentional."
+  },
+  {
+    "trend_name": "Chunky shoe comeback",
+    "category": "shoes",
+    "tags": ["y2k", "chunky", "platform", "streetwear"],
+    "colors": ["white", "black", "silver"],
+    "signal": "Chunky sneakers and platforms are being used to make simple outfits feel more styled.",
+    "styling_tip": "Use cuffed denim, a mini or midi skirt, or a cropped pant hem so the shoe shape stays visible."
+  },
+  {
+    "trend_name": "Quiet vintage accessories",
+    "category": "accessories",
+    "tags": ["classic", "vintage", "western", "minimal"],
+    "colors": ["brown", "tan", "black"],
+    "signal": "Low-key vintage accessories are trending as a way to make basics feel personal without overpowering the outfit.",
+    "styling_tip": "Repeat the accessory color once elsewhere in the look, then keep the rest of the outfit simple."
+  }
+]

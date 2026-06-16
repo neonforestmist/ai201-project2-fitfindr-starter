@@ -25,7 +25,7 @@ python -c "from agent import run_agent; from utils.data_loader import get_exampl
 Observed output:
 
 ```text
-I couldn't find any listings for "designer ballgown" with size XXS and under $5. Try loosening the size, raising the budget, or using a broader search term like a style tag, color, or category.
+I couldn't find any listings for "designer ballgown" with size XXS and under $5. I also retried after removing size XXS and the $5 price cap, but still found no matches. Try using a broader search term like a style tag, color, or category.
 fit_card: None
 ```
 
@@ -65,4 +65,4 @@ Screenshot captured at:
 docs/milestone5_no_results.jpg
 ```
 
-This screenshot shows the impossible search query in the Gradio UI, the helpful no-results message in the first output panel, and blank outfit/fit-card panels.
+This screenshot shows the impossible search query in the Gradio UI, the helpful no-results message in the first output panel, and blank outfit/fit-card panels. The current stretch version also documents the automatic loosened retry before stopping.

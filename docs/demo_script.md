@@ -1,33 +1,29 @@
 # FitFindr Demo Script
 
-This is the narration script for `docs/fitfindr_demo.mp4`.
+Use this as a 3-5 minute narration guide for the final recording.
 
 ## Script
 
 Hi, this is FitFindr, a multi-tool AI agent for secondhand shopping and outfit styling.
 
-The goal of the project is not just to call a language model once. FitFindr has a planning loop that decides which tool to call next based on the state from the previous step. The three required tools are `search_listings`, `suggest_outfit`, and `create_fit_card`.
+The three required tools are `search_listings`, `suggest_outfit`, and `create_fit_card`. I also added all four stretch features: price comparison, style profile memory, trend awareness, and retry logic with fallback.
 
-On the first screen, the user can type what they are looking for and choose either the example wardrobe or an empty wardrobe. For the happy-path demo, I am using the query: vintage graphic tee under thirty dollars.
+For the happy path, I will search: vintage graphic tee under thirty dollars.
 
-When I submit this query, the agent first parses the natural-language request into structured search parameters. In this case, the parsed description is vintage graphic tee, the size is empty, and the max price is thirty dollars. Those parsed values are stored in `session["parsed"]`.
+When I submit, the agent parses the natural-language query into `description`, `size`, and `max_price`, then stores those values in `session["parsed"]`. It calls `search_listings(description, size, max_price)`, which loads the mock listing dataset, filters by hard constraints, scores listings by keyword and style-tag overlap, and returns the best matches.
 
-The planning loop then calls `search_listings(description, size, max_price)`. This tool loads the mock listing data, filters by price and size when those constraints exist, scores the remaining listings by keyword and style-tag relevance, and returns matching listing dictionaries sorted best first.
+The top listing is saved as `session["selected_item"]`. That exact item is reused by the later tools without the user re-entering it.
 
-The top listing is saved in `session["selected_item"]`. This is the first important state handoff. The agent does not ask the user to re-enter the item. It passes the selected listing directly into the next tool.
+Before styling, the stretch tools run. `compare_price(selected_item)` compares the item to similar listings from `data/listings.json` and writes the result to the Price check panel. `get_trend_context(selected_item)` reads `data/trends.json` and writes the matching trend note to the Trend context panel.
 
-Next, the planning loop calls `suggest_outfit(selected_item, wardrobe)`. Because the example wardrobe is selected, the tool receives the actual wardrobe items from `wardrobe_schema.json`. The output names real pieces from that wardrobe, such as baggy jeans, chunky sneakers, or boots, and explains how they work with the selected thrift listing.
+Next, the agent calls `suggest_outfit(selected_item, wardrobe, trend_context, style_profile)`. This uses the selected item, the chosen wardrobe, the trend note, and any saved style preferences. The outfit text is stored in `session["outfit_suggestion"]`.
 
-That outfit text is then stored in `session["outfit_suggestion"]`. This is the second state handoff. The exact outfit suggestion becomes the input to `create_fit_card`.
+Finally, the agent calls `create_fit_card(outfit_suggestion, selected_item)`. That creates the caption-style fit card. At this point, the UI shows the listing, price check, trend context, outfit idea, fit card, and saved style memory. The style memory is updated after the successful run.
 
-Finally, the agent calls `create_fit_card(outfit_suggestion, selected_item)`. This tool uses the selected item, price, platform, and outfit suggestion to write a short caption-style fit card. At the end of the successful flow, the Gradio UI shows all three panels: the top listing, the outfit idea, and the fit card.
+To show the memory stretch point, I will run a second query without restating the first style preferences. The Style memory panel should show that the agent carried preferences such as vintage, graphic tee, colors, and categories forward into the next interaction.
 
-Now I will show an error path. I use an impossible query: designer ballgown size extra extra small under five dollars. This deliberately causes `search_listings` to return an empty list.
+Now I will show retry logic. I will search: 90s track jacket size extra extra small under five dollars. The exact search returns no results, so the agent automatically retries after removing the size and price constraints. It explains that adjustment in the listing panel, then continues through price comparison, trend lookup, outfit suggestion, and fit-card creation.
 
-Because there is no selected item, the planning loop stops immediately. It does not call `suggest_outfit`, and it does not call `create_fit_card`. Instead, it sets `session["error"]` to a helpful message telling the user that no listings were found and suggesting ways to loosen the search, such as broadening the size, raising the budget, or using a broader search term.
+Finally, I will show a true failure path: designer ballgown size extra extra small under five dollars. The exact search fails, and the loosened retry still fails. Because there is no selected item, the agent stops before outfit generation and fit-card creation. The error message tells the user what failed and suggests using a broader search term.
 
-That behavior matters because an agent should not keep going with invalid state. If search returns nothing, there is no item to style and no outfit to turn into a caption. FitFindr handles that failure gracefully and keeps the user oriented.
-
-I also tested the other failure modes directly. If the wardrobe is empty, `suggest_outfit` returns general styling advice instead of crashing. If `create_fit_card` receives an empty outfit string, it returns a descriptive error message instead of raising a Python exception.
-
-So the completed project demonstrates the full required agent workflow: tools with defined interfaces, state passing across tool calls, a planning loop with conditional branches, and deliberate error handling for the most important failure modes.
+That shows the required workflow and the stretch behavior: defined tool interfaces, state passing across calls, conditional planning, graceful failure handling, price comparison, style memory, trend-aware outfit suggestions, and automatic retry with an explanation.

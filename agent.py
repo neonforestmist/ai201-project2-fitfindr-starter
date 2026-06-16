@@ -20,12 +20,102 @@ Usage (once implemented):
 
 import re
 
-from tools import search_listings, suggest_outfit, create_fit_card
+from tools import (
+    compare_price,
+    create_fit_card,
+    get_trend_context,
+    search_listings,
+    suggest_outfit,
+)
+
+
+_STYLE_TERMS = {
+    "90s",
+    "athletic",
+    "classic",
+    "cottagecore",
+    "cozy",
+    "grunge",
+    "linen",
+    "minimal",
+    "oversized",
+    "platform",
+    "streetwear",
+    "vintage",
+    "western",
+    "y2k",
+}
+
+
+def _dedupe_keep_order(values: list[str], limit: int = 8) -> list[str]:
+    seen = set()
+    deduped = []
+    for value in values:
+        cleaned = str(value).strip().lower()
+        if not cleaned or cleaned in seen:
+            continue
+        seen.add(cleaned)
+        deduped.append(cleaned)
+        if len(deduped) == limit:
+            break
+    return deduped
+
+
+def _normalize_style_profile(style_profile: dict | None) -> dict:
+    if not isinstance(style_profile, dict):
+        style_profile = {}
+    return {
+        "preferred_tags": _dedupe_keep_order(style_profile.get("preferred_tags", [])),
+        "preferred_colors": _dedupe_keep_order(style_profile.get("preferred_colors", []), limit=6),
+        "preferred_categories": _dedupe_keep_order(style_profile.get("preferred_categories", []), limit=6),
+        "interactions": int(style_profile.get("interactions", 0) or 0),
+    }
+
+
+def _update_style_profile(style_profile: dict | None, query: str, selected_item: dict) -> dict:
+    profile = _normalize_style_profile(style_profile)
+    query_terms = {term.lower() for term in re.findall(r"[a-z0-9]+", query or "")}
+    query_style_terms = sorted(query_terms & _STYLE_TERMS)
+
+    profile["preferred_tags"] = _dedupe_keep_order(
+        query_style_terms
+        + selected_item.get("style_tags", [])
+        + profile["preferred_tags"]
+    )
+    profile["preferred_colors"] = _dedupe_keep_order(
+        selected_item.get("colors", []) + profile["preferred_colors"],
+        limit=6,
+    )
+    profile["preferred_categories"] = _dedupe_keep_order(
+        [selected_item.get("category", "")] + profile["preferred_categories"],
+        limit=6,
+    )
+    profile["interactions"] += 1
+    return profile
+
+
+def _build_retry(parsed: dict) -> dict | None:
+    if parsed.get("size") is None and parsed.get("max_price") is None:
+        return None
+    return {
+        "description": parsed.get("description", ""),
+        "size": None,
+        "max_price": None,
+    }
+
+
+def _format_retry_adjustment(parsed: dict) -> str:
+    changes = []
+    if parsed.get("size"):
+        changes.append(f"size {parsed['size']}")
+    if parsed.get("max_price") is not None:
+        changes.append(f"the ${parsed['max_price']:.0f} price cap")
+    return " and ".join(changes)
 
 
 # ── session state ─────────────────────────────────────────────────────────────
 
-def _new_session(query: str, wardrobe: dict) -> dict:
+def _new_session(query: str, wardrobe: dict, style_profile: dict | None = None) -> dict:
     """
     Initialize and return a fresh session dict for one user interaction.
 
@@ -41,8 +131,14 @@ def _new_session(query: str, wardrobe: dict) -> dict:
         "search_results": [],        # list of matching listing dicts
         "selected_item": None,       # top result, passed into suggest_outfit
         "wardrobe": wardrobe,        # user's wardrobe dict
+        "price_assessment": None,    # stretch price comparison output
+        "trend_context": None,       # stretch trend-awareness output
         "outfit_suggestion": None,   # string returned by suggest_outfit
         "fit_card": None,            # string returned by create_fit_card
+        "retry": None,               # retry metadata when search is loosened
+        "retry_note": None,          # user-facing explanation of retry changes
+        "style_profile_before": _normalize_style_profile(style_profile),
+        "style_profile_after": _normalize_style_profile(style_profile),
         "error": None,               # set if the interaction ended early
     }
 
@@ -111,7 +207,7 @@ def _parse_query(query: str) -> dict:
     }
 
 
-def _format_no_results_message(parsed: dict) -> str:
+def _format_no_results_message(parsed: dict, retry: dict | None = None) -> str:
     description = parsed.get("description") or "that item"
     filters = []
     if parsed.get("size"):
@@ -120,10 +216,16 @@ def _format_no_results_message(parsed: dict) -> str:
         filters.append(f"under ${parsed['max_price']:.0f}")
 
     filter_text = f" with {' and '.join(filters)}" if filters else ""
+    retry_text = ""
+    if retry:
+        retry_text = (
+            f" I also retried after removing {_format_retry_adjustment(parsed)}, "
+            "but still found no matches."
+        )
     return (
-        f"I couldn't find any listings for \"{description}\"{filter_text}. "
-        "Try loosening the size, raising the budget, or using a broader search "
-        "term like a style tag, color, or category."
+        f"I couldn't find any listings for \"{description}\"{filter_text}."
+        f"{retry_text} Try using a broader search term like a style tag, "
+        "color, or category."
     )
 
 
@@ -135,7 +237,7 @@ def _looks_like_tool_error(value: str | None) -> bool:
 
 # ── planning loop ─────────────────────────────────────────────────────────────
 
-def run_agent(query: str, wardrobe: dict) -> dict:
+def run_agent(query: str, wardrobe: dict, style_profile: dict | None = None) -> dict:
     """
     Main agent entry point. Runs the FitFindr planning loop for a single
     user interaction and returns the completed session dict.
@@ -145,6 +247,7 @@ def run_agent(query: str, wardrobe: dict) -> dict:
                   (e.g., "vintage graphic tee under $30, size M")
         wardrobe: User's wardrobe dict — use get_example_wardrobe() or
                   get_empty_wardrobe() from utils/data_loader.py
+        style_profile: Optional saved preferences from earlier interactions.
 
     Returns:
         The session dict after the interaction completes. Check session["error"]
@@ -155,7 +258,7 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     search, stop early if no listings are found, then pass selected_item into
     suggest_outfit and pass that result into create_fit_card.
     """
-    session = _new_session(query, wardrobe)
+    session = _new_session(query, wardrobe, style_profile)
 
     if not query or not query.strip():
         session["error"] = "Tell me what thrifted item you want to search for."
@@ -180,12 +283,54 @@ def run_agent(query: str, wardrobe: dict) -> dict:
 
     session["search_results"] = search_results
     if not search_results:
-        session["error"] = _format_no_results_message(parsed)
-        return session
+        retry_parsed = _build_retry(parsed)
+        if retry_parsed:
+            try:
+                retry_results = search_listings(
+                    retry_parsed["description"],
+                    size=retry_parsed["size"],
+                    max_price=retry_parsed["max_price"],
+                )
+            except Exception as exc:
+                session["error"] = f"Retry search failed before I could find listings: {exc}"
+                return session
 
-    session["selected_item"] = search_results[0]
+            session["retry"] = {
+                "original": parsed,
+                "adjusted": retry_parsed,
+                "results_found": len(retry_results),
+            }
+            if retry_results:
+                session["search_results"] = retry_results
+                session["retry_note"] = (
+                    "I found no exact matches, so I automatically retried and "
+                    f"removed {_format_retry_adjustment(parsed)}."
+                )
+            else:
+                session["error"] = _format_no_results_message(parsed, session["retry"])
+                return session
+        else:
+            session["error"] = _format_no_results_message(parsed)
+            return session
 
-    outfit = suggest_outfit(session["selected_item"], session["wardrobe"])
+    session["selected_item"] = session["search_results"][0]
+
+    try:
+        session["price_assessment"] = compare_price(session["selected_item"])
+    except Exception as exc:
+        session["price_assessment"] = f"Price comparison unavailable: {exc}"
+
+    try:
+        session["trend_context"] = get_trend_context(session["selected_item"])
+    except Exception as exc:
+        session["trend_context"] = f"Trend lookup unavailable: {exc}"
+
+    outfit = suggest_outfit(
+        session["selected_item"],
+        session["wardrobe"],
+        trend_context=session["trend_context"],
+        style_profile=session["style_profile_before"],
+    )
     session["outfit_suggestion"] = outfit
     if _looks_like_tool_error(outfit):
         session["error"] = (
@@ -197,6 +342,13 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     session["fit_card"] = fit_card
     if _looks_like_tool_error(fit_card):
         session["error"] = "I made an outfit suggestion, but couldn't create a fit card."
+        return session
+
+    session["style_profile_after"] = _update_style_profile(
+        session["style_profile_before"],
+        query,
+        session["selected_item"],
+    )
 
     return session
 

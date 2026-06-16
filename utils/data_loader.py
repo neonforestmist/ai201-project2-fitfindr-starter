@@ -50,6 +50,19 @@ def load_wardrobe_schema() -> dict:
         return json.load(f)
 
 
+def load_trends() -> list[dict]:
+    """
+    Load the small trend dataset used by the stretch trend-awareness tool.
+
+    Returns:
+        A list of trend dictionaries. Each trend has matching fields such as
+        category, tags, colors, trend_name, signal, and styling_tip.
+    """
+    path = os.path.join(_DATA_DIR, "trends.json")
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def get_example_wardrobe() -> dict:
     """
     Convenience function — returns just the example wardrobe items list.

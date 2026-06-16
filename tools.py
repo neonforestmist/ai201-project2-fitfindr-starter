@@ -10,6 +10,8 @@ Tools:
     search_listings(description, size, max_price)  → list[dict]
     suggest_outfit(new_item, wardrobe)              → str
     create_fit_card(outfit, new_item)               → str
+    compare_price(new_item, listings)               → str
+    get_trend_context(new_item)                     → str
 """
 
 import os
@@ -18,7 +20,7 @@ import re
 from dotenv import load_dotenv
 from groq import Groq
 
-from utils.data_loader import load_listings
+from utils.data_loader import load_listings, load_trends
 
 load_dotenv()
 
@@ -197,7 +199,12 @@ def _choose_wardrobe_piece(items: list[dict], category: str) -> dict | None:
     return None
 
 
-def _fallback_outfit(new_item: dict, wardrobe: dict | None = None) -> str:
+def _fallback_outfit(
+    new_item: dict,
+    wardrobe: dict | None = None,
+    trend_context: str | None = None,
+    style_profile: dict | None = None,
+) -> str:
     title = new_item.get("title", "this find")
     category = new_item.get("category", "item")
     tags = ", ".join(new_item.get("style_tags", [])[:3]) or "thrifted"
@@ -216,11 +223,17 @@ def _fallback_outfit(new_item: dict, wardrobe: dict | None = None) -> str:
                 break
 
         if pieces:
-            return (
+            outfit = (
                 f"Style {title} with {', '.join(pieces)} for a {tags} look. "
                 f"Keep the {colors} tones visible and balance the thrifted piece "
                 "with one clean basic so the outfit feels intentional."
             )
+            profile_note = _profile_summary(style_profile)
+            if profile_note:
+                outfit += f" This also fits your saved style profile ({profile_note})."
+            if trend_context:
+                outfit += f" Trend cue: {trend_context}"
+            return outfit
 
     category_advice = {
         "tops": "relaxed denim or wide-leg trousers, then finish with sneakers or boots",
@@ -230,10 +243,26 @@ def _fallback_outfit(new_item: dict, wardrobe: dict | None = None) -> str:
         "accessories": "a simple base outfit and one matching color elsewhere in the look",
     }
     advice = category_advice.get(category, "closet basics that repeat one color from the piece")
-    return (
+    outfit = (
         f"For {title}, build around its {tags} feel and {colors} palette: pair it "
         f"with {advice}. Add one contrasting texture so the look feels styled, not random."
     )
+    profile_note = _profile_summary(style_profile)
+    if profile_note:
+        outfit += f" This also fits your saved style profile ({profile_note})."
+    if trend_context:
+        outfit += f" Trend cue: {trend_context}"
+    return outfit
+
+
+def _format_prompt_context(trend_context: str | None, style_profile: dict | None) -> str:
+    sections = []
+    if trend_context:
+        sections.append(f"Trend context to visibly use in the outfit: {trend_context}")
+    profile_note = _profile_summary(style_profile)
+    if profile_note:
+        sections.append(f"Saved style profile from prior interactions: {profile_note}")
+    return "\n".join(sections)
 
 
 def _fallback_fit_card(outfit: str, new_item: dict) -> str:
@@ -244,6 +273,145 @@ def _fallback_fit_card(outfit: str, new_item: dict) -> str:
     return (
         f"Found {title} on {platform} for {price}, and it is doing all the "
         f"{tags} work. Styled it with {outfit.strip()}."
+    )
+
+
+def _profile_summary(style_profile: dict | None) -> str:
+    if not isinstance(style_profile, dict):
+        return ""
+
+    preferred_tags = style_profile.get("preferred_tags") or []
+    preferred_colors = style_profile.get("preferred_colors") or []
+    pieces = []
+    if preferred_tags:
+        pieces.append(f"style tags: {', '.join(preferred_tags[:4])}")
+    if preferred_colors:
+        pieces.append(f"colors: {', '.join(preferred_colors[:3])}")
+    return "; ".join(pieces)
+
+
+def _listing_tag_set(listing: dict, key: str) -> set[str]:
+    values = listing.get(key, [])
+    if not isinstance(values, list):
+        values = [values]
+    return {str(value).lower() for value in values if value}
+
+
+def _comparable_score(new_item: dict, listing: dict) -> int:
+    score = 0
+    if listing.get("category") == new_item.get("category"):
+        score += 4
+    score += len(_listing_tag_set(new_item, "style_tags") & _listing_tag_set(listing, "style_tags")) * 3
+    score += len(_listing_tag_set(new_item, "colors") & _listing_tag_set(listing, "colors")) * 2
+    return score
+
+
+def _comparable_listings(new_item: dict, listings: list[dict]) -> list[dict]:
+    selected_id = new_item.get("id")
+    scored = []
+    for listing in listings:
+        if selected_id and listing.get("id") == selected_id:
+            continue
+        score = _comparable_score(new_item, listing)
+        if score >= 4:
+            scored.append((score, listing))
+
+    scored.sort(key=lambda item: (-item[0], abs(float(item[1].get("price", 0)) - float(new_item.get("price", 0)))))
+    return [listing for _, listing in scored]
+
+
+def compare_price(new_item: dict, listings: list[dict] | None = None) -> str:
+    """
+    Compare a selected listing's price against similar listings in the dataset.
+
+    Args:
+        new_item: The selected listing dict.
+        listings: Optional list of listing dicts to compare against. When
+                  omitted, the full mock dataset is loaded.
+
+    Returns:
+        A short price assessment with the selected price, comparable count,
+        average comparable price, range, and reasoning.
+    """
+    if not new_item:
+        return "I need a selected listing before I can compare prices."
+
+    try:
+        selected_price = float(new_item.get("price"))
+    except (TypeError, ValueError):
+        return "I need a numeric listing price before I can compare prices."
+
+    all_listings = load_listings() if listings is None else listings
+    comparable = _comparable_listings(new_item, all_listings)
+    if not comparable:
+        return (
+            f"{_item_summary(new_item)} does not have enough comparable items "
+            "in the dataset for a confident price check."
+        )
+
+    prices = [float(item["price"]) for item in comparable if item.get("price") is not None]
+    average_price = sum(prices) / len(prices)
+    low_price = min(prices)
+    high_price = max(prices)
+
+    if selected_price <= average_price * 0.9:
+        verdict = "good deal"
+    elif selected_price >= average_price * 1.15:
+        verdict = "priced a little high"
+    else:
+        verdict = "fairly priced"
+
+    category = new_item.get("category", "item")
+    tags = ", ".join(new_item.get("style_tags", [])[:3]) or "similar style"
+    sample_titles = ", ".join(item.get("title", "untitled") for item in comparable[:3])
+    return (
+        f"Price check: {_format_price(selected_price)} looks {verdict}. "
+        f"I compared it with {len(prices)} {category} listings sharing tags/colors "
+        f"like {tags}. Comparable prices average {_format_price(average_price)} "
+        f"and range from {_format_price(low_price)} to {_format_price(high_price)}. "
+        f"Closest comps include: {sample_titles}."
+    )
+
+
+def _trend_score(new_item: dict, trend: dict) -> int:
+    score = 0
+    if trend.get("category") == new_item.get("category"):
+        score += 4
+    item_tags = _listing_tag_set(new_item, "style_tags")
+    trend_tags = {str(tag).lower() for tag in trend.get("tags", [])}
+    item_colors = _listing_tag_set(new_item, "colors")
+    trend_colors = {str(color).lower() for color in trend.get("colors", [])}
+    score += len(item_tags & trend_tags) * 3
+    score += len(item_colors & trend_colors) * 2
+    return score
+
+
+def get_trend_context(new_item: dict) -> str:
+    """
+    Return trend context for a selected listing using data/trends.json.
+
+    Args:
+        new_item: The selected listing dict.
+
+    Returns:
+        A short trend note that can influence outfit generation.
+    """
+    if not new_item:
+        return "I need a selected listing before I can look up trend context."
+
+    trends = load_trends()
+    ranked = sorted(
+        ((_trend_score(new_item, trend), trend) for trend in trends),
+        key=lambda item: item[0],
+        reverse=True,
+    )
+    best_score, best_trend = ranked[0]
+    if best_score <= 0:
+        return "No strong trend match found; style this as a timeless secondhand piece."
+
+    return (
+        f"Trend: {best_trend['trend_name']}. {best_trend['signal']} "
+        f"Outfit influence: {best_trend['styling_tip']}"
     )
 
 
@@ -308,7 +476,12 @@ def search_listings(
 
 # ── Tool 2: suggest_outfit ────────────────────────────────────────────────────
 
-def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
+def suggest_outfit(
+    new_item: dict,
+    wardrobe: dict,
+    trend_context: str | None = None,
+    style_profile: dict | None = None,
+) -> str:
     """
     Given a thrifted item and the user's wardrobe, suggest 1–2 complete outfits.
 
@@ -316,6 +489,8 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
         new_item: A listing dict (the item the user is considering buying).
         wardrobe: A wardrobe dict with an 'items' key containing a list of
                   wardrobe item dicts. May be empty — handle this gracefully.
+        trend_context: Optional trend note from get_trend_context().
+        style_profile: Optional saved style preferences from earlier runs.
 
     Returns:
         A non-empty string with outfit suggestions.
@@ -332,6 +507,7 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
 
     wardrobe_items = wardrobe.get("items", []) if isinstance(wardrobe, dict) else []
     item_summary = _item_summary(new_item)
+    prompt_context = _format_prompt_context(trend_context, style_profile)
 
     if not wardrobe_items:
         prompt = (
@@ -351,6 +527,9 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
             f"User wardrobe:\n{_format_wardrobe_items(wardrobe_items)}"
         )
 
+    if prompt_context:
+        prompt += f"\n\n{prompt_context}"
+
     try:
         return _call_groq(
             [
@@ -364,7 +543,7 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
             max_tokens=260,
         )
     except Exception:
-        return _fallback_outfit(new_item, wardrobe)
+        return _fallback_outfit(new_item, wardrobe, trend_context, style_profile)
 
 
 # ── Tool 3: create_fit_card ───────────────────────────────────────────────────
